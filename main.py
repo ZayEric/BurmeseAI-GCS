@@ -17,8 +17,8 @@ app = Flask(__name__)
 
 WORKSPACE = "/workspace"
 
-ASR_BUCKET = "asr-model-bucket"
-ASR_PREFIX = "model/finetuned-asr-burmese"
+ASR_BUCKET = "speechtotext-model-bucket"
+ASR_PREFIX = "model/finetuned-seamlessm4t-burmese"
 
 QA_BUCKET = "qa-model-bucket"
 QA_PREFIX = "model/finetuned-qa-burmese"
