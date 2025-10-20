@@ -1,19 +1,45 @@
-from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
-import os, logging
+import os
+import logging
 from threading import Lock
+from flask import Flask, request, jsonify
+from google.cloud import storage
+from transformers import (
+    pipeline,
+    AutoModelForSpeechSeq2Seq,
+    AutoProcessor,
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM
+)
+import torch
 
-load_lock = Lock()
-qa_pipe = None
-qa_model = None
-qa_tokenizer = None
+# ---------- Configuration ----------
+app = Flask(__name__)
 
 WORKSPACE = "/workspace"
+
+ASR_BUCKET = "asr-model-bucket"
+ASR_PREFIX = "model/finetuned-asr-burmese"
+
 QA_BUCKET = "qa-model-bucket"
 QA_PREFIX = "model/finetuned-qa-burmese"
 
+logging.basicConfig(level=logging.INFO)
+
+# ---------- Lazy Loading Locks ----------
+asr_lock = Lock()
+qa_lock = Lock()
+
+# ---------- Global Models ----------
+asr_pipe = None
+qa_pipe = None
+asr_model = None
+asr_processor = None
+qa_model = None
+qa_tokenizer = None
+
+# ---------- Utility: GCS Download ----------
 def download_from_gcs(bucket_name, prefix, local_dir):
-    """Download all files under prefix from GCS to local_dir, preserving folder structure."""
-    from google.cloud import storage
+    """Download files recursively from GCS preserving structure."""
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     blobs = list(bucket.list_blobs(prefix=prefix))
@@ -24,12 +50,9 @@ def download_from_gcs(bucket_name, prefix, local_dir):
 
     os.makedirs(local_dir, exist_ok=True)
     for blob in blobs:
-        # Skip empty blobs
         if blob.size == 0:
             continue
-        # Remove the prefix from blob name
         rel_path = os.path.relpath(blob.name, prefix)
-        # Flatten checkpoint folder if you want
         if rel_path.startswith("checkpoint/"):
             continue
         local_path = os.path.join(local_dir, rel_path)
@@ -39,21 +62,88 @@ def download_from_gcs(bucket_name, prefix, local_dir):
 
     logging.info(f"✅ Finished downloading {len(blobs)} files from {bucket_name}/{prefix}")
 
+# ---------- Lazy Loading: ASR ----------
+def get_asr_pipeline():
+    global asr_pipe, asr_model, asr_processor
+    with asr_lock:
+        if asr_pipe is None:
+            local_path = os.path.join(WORKSPACE, "asr")
+            if not os.path.exists(local_path) or not os.listdir(local_path):
+                logging.info("Downloading ASR model from GCS...")
+                download_from_gcs(ASR_BUCKET, ASR_PREFIX, local_path)
+
+            logging.info(f"Loading ASR model from {local_path}...")
+            asr_processor = AutoProcessor.from_pretrained(local_path)
+            asr_model = AutoModelForSpeechSeq2Seq.from_pretrained(local_path, torch_dtype=torch.float16)
+            asr_pipe = pipeline(
+                "automatic-speech-recognition",
+                model=asr_model,
+                tokenizer=asr_processor.tokenizer,
+                feature_extractor=asr_processor.feature_extractor,
+                torch_dtype=torch.float16,
+                device_map="auto"
+            )
+            logging.info("✅ ASR model loaded")
+    return asr_pipe
+
+# ---------- Lazy Loading: QA ----------
 def get_qa_pipeline():
-    """Lazy-load QA model safely for large safetensors."""
     global qa_pipe, qa_model, qa_tokenizer
-    with load_lock:
+    with qa_lock:
         if qa_pipe is None:
             local_path = os.path.join(WORKSPACE, "qa")
             if not os.path.exists(local_path) or not os.listdir(local_path):
                 logging.info("Downloading QA model from GCS...")
                 download_from_gcs(QA_BUCKET, QA_PREFIX, local_path)
 
-            logging.info(f"Loading QA tokenizer and model from {local_path}...")
-            # Load tokenizer and model safely
+            logging.info(f"Loading QA model from {local_path}...")
             qa_tokenizer = AutoTokenizer.from_pretrained(local_path, use_fast=False)
             qa_model = AutoModelForSeq2SeqLM.from_pretrained(local_path, device_map="auto")
             qa_pipe = pipeline("text2text-generation", model=qa_model, tokenizer=qa_tokenizer)
             logging.info("✅ QA model loaded")
-
     return qa_pipe
+
+# ---------- API Routes ----------
+@app.route("/healthz", methods=["GET"])
+def health_check():
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route("/asr", methods=["POST"])
+def transcribe_audio():
+    """Receive base64 audio and return transcription."""
+    try:
+        data = request.get_json()
+        audio_base64 = data.get("audio_base64")
+        import base64
+        import io
+        import soundfile as sf
+
+        if not audio_base64:
+            return jsonify({"error": "Missing audio_base64"}), 400
+
+        audio_bytes = base64.b64decode(audio_base64)
+        audio_stream = io.BytesIO(audio_bytes)
+        audio, sr = sf.read(audio_stream)
+
+        asr = get_asr_pipeline()
+        result = asr(audio, generate_kwargs={"max_new_tokens": 128})
+        return jsonify({"text": result["text"]})
+
+    except Exception as e:
+        logging.exception("ASR error")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/speechqa", methods=["POST"])
+def speech_to_qa():
+    """Receive audio, transcribe, then answer a question."""
+    try:
+        data = request.get_json()
+        audio_base64 = data.get("audio_base64")
+        question = data.get("question", "")
+
+        if not audio_base64:
+            return jsonify({"error": "Missing audio_base64"}), 400
+
+        # Step
