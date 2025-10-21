@@ -146,4 +146,28 @@ def speech_to_qa():
         if not audio_base64:
             return jsonify({"error": "Missing audio_base64"}), 400
 
-        # Step
+        import base64, io, soundfile as sf
+
+        # Decode audio
+        audio_bytes = base64.b64decode(audio_base64)
+        audio_stream = io.BytesIO(audio_bytes)
+        audio, sr = sf.read(audio_stream)
+
+        # Run ASR
+        asr = get_asr_pipeline()
+        asr_result = asr(audio, generate_kwargs={"max_new_tokens": 128})
+        transcript = asr_result["text"]
+
+        # Run QA
+        qa = get_qa_pipeline()
+        qa_result = qa(f"question: {question} context: {transcript}")
+        answer = qa_result[0]["generated_text"]
+
+        return jsonify({
+            "transcript": transcript,
+            "answer": answer
+        })
+
+    except Exception as e:
+        logging.exception("SpeechQA error")
+        return jsonify({"error": str(e)}), 500
