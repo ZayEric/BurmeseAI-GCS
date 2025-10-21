@@ -168,13 +168,11 @@ def speech_to_qa():
             "transcript": transcript,
             "answer": answer
         })
+    except Exception as e:
+        logging.exception("SpeechQA error")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     logging.info("Preloading QA model at startup...")
     get_qa_pipeline()  # Force model download once
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-
-    except Exception as e:
-        logging.exception("SpeechQA error")
-        return jsonify({"error": str(e)}), 500
