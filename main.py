@@ -132,7 +132,7 @@ def transcribe_audio():
             missing_padding = len(audio_base64) % 4
             if missing_padding:
                 audio_base64 += '=' * (4 - missing_padding)
-            audio_bytes = base64.b64decode(audio_base64)
+        audio_bytes = base64.b64decode(audio_base64)
         audio_stream = io.BytesIO(audio_bytes)
         audio, sr = sf.read(audio_stream)
 
@@ -159,6 +159,15 @@ def speech_to_qa():
         import base64, io, soundfile as sf
 
         # Decode audio
+        #audio_bytes = base64.b64decode(audio_base64)
+        if audio_base64.startswith("http"):
+            response = requests.get(audio_base64)
+            audio_bytes = response.content
+        else:
+            # fallback if it’s real base64
+            missing_padding = len(audio_base64) % 4
+            if missing_padding:
+                audio_base64 += '=' * (4 - missing_padding)
         audio_bytes = base64.b64decode(audio_base64)
         audio_stream = io.BytesIO(audio_bytes)
         audio, sr = sf.read(audio_stream)
