@@ -144,7 +144,7 @@ def transcribe_audio():
         logging.exception("ASR error")
         return jsonify({"error": str(e)}), 500
 
-
+# ---------- /speechqa ----------
 @app.route("/speechqa", methods=["POST"])
 def speech_to_qa():
     """Receive audio, transcribe, then answer a question."""
@@ -159,16 +159,19 @@ def speech_to_qa():
         import base64, io, soundfile as sf
 
         # Decode audio
-        #audio_bytes = base64.b64decode(audio_base64)
-        if audio_base64.startswith("http"):
-            response = requests.get(audio_base64)
+
+        audio_url = audio_base64
+        if not audio_url:
+            return JSONResponse({"error": "Missing audio_url"}, status_code=400)
+
+        logging.info("Url starts with:", audio_url[:100])
+
+        if audio_url.startswith("http"):
+            resp = requests.get(audio_url)
             audio_bytes = response.content
         else:
-            # fallback if it’s real base64
-            missing_padding = len(audio_base64) % 4
-            if missing_padding:
-                audio_base64 += '=' * (4 - missing_padding)
-        audio_bytes = base64.b64decode(audio_base64)
+            audio_bytes = base64.b64decode(audio_url)
+            
         audio_stream = io.BytesIO(audio_bytes)
         audio, sr = sf.read(audio_stream)
 
@@ -190,6 +193,27 @@ def speech_to_qa():
     except Exception as e:
         logging.exception("SpeechQA error")
         return jsonify({"error": str(e)}), 500
+
+# ---------- /textqa ----------
+@app.route("/textqa", methods=["POST"])
+def text_to_qa():
+    """Receive question in text, then answer a question."""
+    try:
+        data = request.get_json()
+        question = data.get("text", "")
+
+        # Run QA
+        qa = get_qa_pipeline()
+        qa_result = qa(f"question: {question}\nAnswer:")
+        answer = qa_result[0]["generated_text"]
+
+        return jsonify({
+            "answer": answer
+        })
+    except Exception as e:
+        logging.exception("TextQA error")
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     logging.info("Preloading QA model at startup...")
