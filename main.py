@@ -17,8 +17,8 @@ app = Flask(__name__)
 
 WORKSPACE = "/workspace"
 
-ASR_BUCKET = "speechtotext-model-bucket"
-ASR_PREFIX = "model/finetuned-seamlessm4t-burmese"
+#ASR_BUCKET = "speechtotext-model-bucket"
+#ASR_PREFIX = "model/finetuned-seamlessm4t-burmese"
 
 QA_BUCKET = "qa-model-bucket"
 QA_PREFIX = "model/finetuned-qa-burmese"
@@ -63,28 +63,28 @@ def download_from_gcs(bucket_name, prefix, local_dir):
     logging.info(f"✅ Finished downloading {len(blobs)} files from {bucket_name}/{prefix}")
 
 # ---------- Lazy Loading: ASR ----------
-def get_asr_pipeline():
-    global asr_pipe, asr_model, asr_processor
-    with asr_lock:
-        if asr_pipe is None:
-            local_path = os.path.join(WORKSPACE, "asr")
-            if not os.path.exists(local_path) or not os.listdir(local_path):
-                logging.info("Downloading ASR model from GCS...")
-                download_from_gcs(ASR_BUCKET, ASR_PREFIX, local_path)
+#def get_asr_pipeline():
+#    global asr_pipe, asr_model, asr_processor
+#    with asr_lock:
+#        if asr_pipe is None:
+#            local_path = os.path.join(WORKSPACE, "asr")
+#            if not os.path.exists(local_path) or not os.listdir(local_path):
+#                logging.info("Downloading ASR model from GCS...")
+#                download_from_gcs(ASR_BUCKET, ASR_PREFIX, local_path)
 
-            logging.info(f"Loading ASR model from {local_path}...")
-            asr_processor = AutoProcessor.from_pretrained(local_path)
-            asr_model = AutoModelForSpeechSeq2Seq.from_pretrained(local_path, torch_dtype=torch.float16)
-            asr_pipe = pipeline(
-                "automatic-speech-recognition",
-                model=asr_model,
-                tokenizer=asr_processor.tokenizer,
-                feature_extractor=asr_processor.feature_extractor,
-                torch_dtype=torch.float16,
-                device_map="auto"
-            )
-            logging.info("✅ ASR model loaded")
-    return asr_pipe
+#            logging.info(f"Loading ASR model from {local_path}...")
+#            asr_processor = AutoProcessor.from_pretrained(local_path)
+#            asr_model = AutoModelForSpeechSeq2Seq.from_pretrained(local_path, torch_dtype=torch.float16)
+#            asr_pipe = pipeline(
+#                "automatic-speech-recognition",
+#                model=asr_model,
+#                tokenizer=asr_processor.tokenizer,
+#                feature_extractor=asr_processor.feature_extractor,
+#                torch_dtype=torch.float16,
+#                device_map="auto"
+#            )
+#            logging.info("✅ ASR model loaded")
+#    return asr_pipe
 
 # ---------- Lazy Loading: QA ----------
 def get_qa_pipeline():
@@ -109,30 +109,30 @@ def health_check():
     return jsonify({"status": "ok"}), 200
 
 
-@app.route("/asr", methods=["POST"])
-def transcribe_audio():
-    """Receive base64 audio and return transcription."""
-    try:
-        data = request.get_json()
-        audio_base64 = data.get("audio_base64")
-        import base64
-        import io
-        import soundfile as sf
+#@app.route("/asr", methods=["POST"])
+#def transcribe_audio():
+#    """Receive base64 audio and return transcription."""
+#    try:
+#        data = request.get_json()
+#        audio_base64 = data.get("audio_base64")
+#        import base64
+#        import io
+#        import soundfile as sf
 
-        if not audio_base64:
-            return jsonify({"error": "Missing audio_base64"}), 400
+#        if not audio_base64:
+#            return jsonify({"error": "Missing audio_base64"}), 400
 
-        audio_bytes = base64.b64decode(audio_base64)
-        audio_stream = io.BytesIO(audio_bytes)
-        audio, sr = sf.read(audio_stream)
+#        audio_bytes = base64.b64decode(audio_base64)
+#        audio_stream = io.BytesIO(audio_bytes)
+#        audio, sr = sf.read(audio_stream)
 
-        asr = get_asr_pipeline()
-        result = asr(audio, generate_kwargs={"max_new_tokens": 128})
-        return jsonify({"text": result["text"]})
+#        asr = get_asr_pipeline()
+#        result = asr(audio, generate_kwargs={"max_new_tokens": 128})
+#        return jsonify({"text": result["text"]})
 
-    except Exception as e:
-        logging.exception("ASR error")
-        return jsonify({"error": str(e)}), 500
+#    except Exception as e:
+#        logging.exception("ASR error")
+#        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/speechqa", methods=["POST"])
@@ -140,31 +140,32 @@ def speech_to_qa():
     """Receive audio, transcribe, then answer a question."""
     try:
         data = request.get_json()
-        audio_base64 = data.get("audio_base64")
+        #audio_base64 = data.get("audio_base64")
         question = data.get("question", "")
 
-        if not audio_base64:
-            return jsonify({"error": "Missing audio_base64"}), 400
+        #if not audio_base64:
+        #    return jsonify({"error": "Missing audio_base64"}), 400
 
-        import base64, io, soundfile as sf
+        #import base64, io, soundfile as sf
 
         # Decode audio
-        audio_bytes = base64.b64decode(audio_base64)
-        audio_stream = io.BytesIO(audio_bytes)
-        audio, sr = sf.read(audio_stream)
+        #audio_bytes = base64.b64decode(audio_base64)
+        #audio_stream = io.BytesIO(audio_bytes)
+        #audio, sr = sf.read(audio_stream)
 
         # Run ASR
-        asr = get_asr_pipeline()
-        asr_result = asr(audio, generate_kwargs={"max_new_tokens": 128})
-        transcript = asr_result["text"]
+        #asr = get_asr_pipeline()
+        #asr_result = asr(audio, generate_kwargs={"max_new_tokens": 128})
+        #transcript = asr_result["text"]
 
         # Run QA
         qa = get_qa_pipeline()
-        qa_result = qa(f"question: {question} context: {transcript}")
+        #qa_result = qa(f"question: {question} context: {transcript}")
+        qa_result = qa(f"question: {question} context: {question}")
         answer = qa_result[0]["generated_text"]
 
         return jsonify({
-            "transcript": transcript,
+            #"transcript": transcript,
             "answer": answer
         })
 
