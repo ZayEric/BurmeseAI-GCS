@@ -11,6 +11,7 @@ from transformers import (
     AutoModelForSeq2SeqLM
 )
 import torch
+import requests
 
 # ---------- Configuration ----------
 app = Flask(__name__)
@@ -122,7 +123,16 @@ def transcribe_audio():
         if not audio_base64:
             return jsonify({"error": "Missing audio_base64"}), 400
 
-        audio_bytes = base64.b64decode(audio_base64)
+        #audio_bytes = base64.b64decode(audio_base64)
+        if audio_base64.startswith("http"):
+            response = requests.get(audio_base64)
+            audio_bytes = response.content
+        else:
+            # fallback if it’s real base64
+            missing_padding = len(audio_base64) % 4
+            if missing_padding:
+                audio_base64 += '=' * (4 - missing_padding)
+            audio_bytes = base64.b64decode(audio_base64)
         audio_stream = io.BytesIO(audio_bytes)
         audio, sr = sf.read(audio_stream)
 
