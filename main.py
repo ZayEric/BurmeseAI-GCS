@@ -168,7 +168,7 @@ def speech_to_qa():
 
         if audio_url.startswith("http"):
             resp = requests.get(audio_url)
-            audio_bytes = response.content
+            audio_bytes = resp.content
         else:
             audio_bytes = base64.b64decode(audio_url)
             
