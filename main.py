@@ -140,7 +140,7 @@ def speech_to_qa():
     """Receive audio, transcribe, then answer a question."""
     try:
         data = request.get_json()
-        #audio_base64 = data.get("audio_base64")
+        audio_base64 = data.get("audio_base64")
         question = data.get("question", "")
 
         if not audio_base64:
