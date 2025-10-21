@@ -164,7 +164,7 @@ def speech_to_qa():
         if not audio_url:
             return JSONResponse({"error": "Missing audio_url"}, status_code=400)
 
-        logging.info("Url starts with:", audio_url[:100])
+        logging.info(f"Url starts with: {audio_url[:100]}")
 
         if audio_url.startswith("http"):
             resp = requests.get(audio_url)
