@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
 COPY . .
 
 COPY model/finetuned-qa-burmese /workspace/qa/
+COPY model/finetuned-seamlessm4t-burmese /workspace/asr/
 
 # Expose the Cloud Run port
 ENV PORT=8080
