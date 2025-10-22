@@ -12,8 +12,8 @@ from transformers import (
 )
 import torch
 import requests
-logging.info("Preloading QA model at import time...")
-get_qa_pipeline()
+#logging.info("Preloading QA model at import time...")
+#get_qa_pipeline()
 # ---------- Configuration ----------
 app = Flask(__name__)
 
@@ -237,4 +237,6 @@ def text_to_qa():
 #    get_qa_pipeline()  # Force model download once
 #    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 if __name__ == "__main__":
+    logging.info("Starting Flask app without preloading models...")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
