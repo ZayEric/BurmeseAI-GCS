@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y \
 # Copy the application files
 COPY . .
 
+COPY model/finetuned-qa-burmese /workspace/qa/
+
 # Expose the Cloud Run port
 ENV PORT=8080
 
