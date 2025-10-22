@@ -20,4 +20,4 @@ COPY . .
 ENV PORT=8080
 
 # Start the Flask app using Gunicorn
-CMD exec gunicorn -w 1 -b 0.0.0.0:$PORT main:app --timeout 300 --preload --threads 1
+CMD exec gunicorn -w 1 -b 0.0.0.0:$PORT main:app --timeout 600 --threads 1 --preload
