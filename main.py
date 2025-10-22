@@ -12,7 +12,8 @@ from transformers import (
 )
 import torch
 import requests
-
+logging.info("Preloading QA model at import time...")
+get_qa_pipeline()
 # ---------- Configuration ----------
 app = Flask(__name__)
 
@@ -209,14 +210,6 @@ def speech_to_qa():
     except Exception as e:
         logging.exception("SpeechQA error")
         return jsonify({"error": str(e)}), 500
-
-
-# ---------- Preload QA model when module is imported ----------
-try:
-    logging.info("Preloading QA model at import time...")
-    get_qa_pipeline()
-except Exception as e:
-    logging.warning(f"QA preload failed (will lazy-load later): {e}")
 
 # ---------- /textqa ----------
 @app.route("/textqa", methods=["POST"])
