@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y \
 
 # Copy the application files
 COPY . .
+# Copy model files from local directory (export from GCS first)
+COPY models/asr /workspace/asr
+COPY models/qa /workspace/qa
 
 # Expose the Cloud Run port
 ENV PORT=8080
