@@ -210,6 +210,14 @@ def speech_to_qa():
         logging.exception("SpeechQA error")
         return jsonify({"error": str(e)}), 500
 
+
+# ---------- Preload QA model when module is imported ----------
+try:
+    logging.info("Preloading QA model at import time...")
+    get_qa_pipeline()
+except Exception as e:
+    logging.warning(f"QA preload failed (will lazy-load later): {e}")
+
 # ---------- /textqa ----------
 @app.route("/textqa", methods=["POST"])
 def text_to_qa():
@@ -231,7 +239,9 @@ def text_to_qa():
         return jsonify({"error": str(e)}), 500
 
 
+#if __name__ == "__main__":
+#    logging.info("Preloading QA model at startup...")
+#    get_qa_pipeline()  # Force model download once
+#    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 if __name__ == "__main__":
-    logging.info("Preloading QA model at startup...")
-    get_qa_pipeline()  # Force model download once
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
