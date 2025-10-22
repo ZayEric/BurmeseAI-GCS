@@ -2,6 +2,7 @@ import os
 import logging
 from threading import Lock
 from flask import Flask, request, jsonify
+import tempfile
 from google.cloud import storage
 from transformers import (
     pipeline,
