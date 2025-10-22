@@ -171,14 +171,30 @@ def speech_to_qa():
             audio_bytes = resp.content
         else:
             audio_bytes = base64.b64decode(audio_url)
+        logging.info(f"Bytes Length: {len(audio_bytes)}")
             
-        audio_stream = io.BytesIO(audio_bytes)
-        audio, sr = sf.read(audio_stream)
+        #audio_stream = io.BytesIO(audio_bytes)
+        #audio, sr = sf.read(audio_stream)
+        # Write to temp file
+        with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as tmp_in:
+            tmp_in.write(audio_bytes)
+            tmp_in_path = tmp_in.name
+
+        # Convert to WAV
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_out:
+            tmp_out_path = tmp_out.name
+            try:
+                audio = AudioSegment.from_file(tmp_in_path)
+                audio.export(tmp_out_path, format="wav")
+            except Exception:
+                tmp_out_path = tmp_in_path
 
         # Run ASR
         asr = get_asr_pipeline()
-        asr_result = asr(audio, generate_kwargs={"max_new_tokens": 128})
-        transcript = asr_result["text"]
+        asr_result = asr(tmp_out_path, generate_kwargs={"tgt_lang": "mya"})
+        transcript = asr_result[0]["text"]
+        #asr_result = asr(audio, generate_kwargs={"max_new_tokens": 128})
+        #transcript = asr_result["text"]
 
         # Run QA
         qa = get_qa_pipeline()
