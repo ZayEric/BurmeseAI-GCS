@@ -16,8 +16,33 @@ RUN apt-get update && apt-get install -y \
 # Copy the application files
 COPY . .
 
-COPY model/finetuned-qa-burmese /workspace/qa/
-COPY model/finetuned-seamlessm4t-burmese /workspace/asr/
+# ===== Download QA model from GCS =====
+# Use the default service account credentials at build time (Cloud Build will inject these)
+RUN python - <<'EOF'
+from google.cloud import storage
+import os
+
+bucket_name = "qa-model-bucket"
+prefix = "model/finetuned-qa-burmese"
+local_dir = "/workspace/qa"
+
+print(f"📦 Downloading {prefix} from {bucket_name} to {local_dir}...")
+
+client = storage.Client()
+bucket = client.bucket(bucket_name)
+blobs = list(bucket.list_blobs(prefix=prefix))
+
+os.makedirs(local_dir, exist_ok=True)
+for blob in blobs:
+    if blob.size == 0:
+        continue
+    rel_path = os.path.relpath(blob.name, prefix)
+    os.makedirs(os.path.dirname(os.path.join(local_dir, rel_path)), exist_ok=True)
+    blob.download_to_filename(os.path.join(local_dir, rel_path))
+    print("✅ Downloaded:", blob.name)
+
+print("🎯 Finished downloading QA model.")
+EOF
 
 # Expose the Cloud Run port
 ENV PORT=8080
