@@ -17,8 +17,5 @@ COPY main.py .
 # ===== Add Python script to download models =====
 COPY download_models.py .
 
-# ===== Download ASR and QA Models from GCS =====
-RUN python download_models.py
-
 # ===== Run App =====
 CMD ["python", "main.py"]
