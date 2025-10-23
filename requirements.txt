@@ -1,11 +1,9 @@
 flask
 gunicorn
-transformers
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
 google-cloud-storage
 ffmpeg-python
 requests
 sentencepiece
 soundfile
+transformers>=4.40.0
 
