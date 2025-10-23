@@ -18,6 +18,10 @@ import io
 import soundfile as sf
 from pydub import AudioSegment
 
+device = 0 if torch.cuda.is_available() else -1
+print(f"🔥 Using device: {'GPU' if device == 0 else 'CPU'}")
+
+
 # ========== CONFIG ==========
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
