@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir torch==2.3.1+cu121 torchvision==0.18.1+cu121 torc
 
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 
 EXPOSE 8080
