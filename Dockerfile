@@ -19,10 +19,14 @@ RUN python -m pip install --upgrade pip
 # ===== COPY DEPENDENCIES =====
 COPY requirements.txt .
 
-# ===== INSTALL DEPENDENCIES =====
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121 \
-    && pip install --no-cache-dir google-cloud-storage Flask pydub soundfile transformers
+# Install requirements first (without transformers)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install torch with CUDA support
+RUN pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Then install transformers last
+RUN pip install --no-cache-dir transformers
 
 # ===== COPY APP FILES =====
 COPY . .
