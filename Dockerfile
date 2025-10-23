@@ -1,41 +1,33 @@
-# =====================================================================
-# ✅ 1. Use NVIDIA CUDA base image compatible with Cloud Run GPU (T4)
-# =====================================================================
-FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
+# ===== Base Image: CUDA 12.1 + Ubuntu 22.04 =====
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
-# =====================================================================
-# ✅ 2. Install system dependencies
-# =====================================================================
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip ffmpeg git curl \
- && rm -rf /var/lib/apt/lists/*
-
+# ===== Environment Setup =====
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
 WORKDIR /app
 
-# =====================================================================
-# ✅ 3. Copy dependency list and install
-# =====================================================================
-COPY requirements.txt .
-RUN pip install --upgrade pip \
- && pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 \
- && pip install google-cloud-storage fastapi uvicorn pydub transformers
+# ===== Install Python 3.11 and dependencies =====
+RUN apt-get update && apt-get install -y \
+    python3.11 python3.11-venv python3.11-distutils python3-pip \
+    curl git ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
-# =====================================================================
-# ✅ 4. Copy application code
-# =====================================================================
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python
+RUN python -m pip install --upgrade pip
+
+# ===== Copy requirements and install dependencies =====
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121 \
+    && pip install --no-cache-dir google-cloud-storage fastapi uvicorn
+
+# ===== Copy source code =====
 COPY . /app
 
-# =====================================================================
-# ✅ 5. Download models from GCS during build
-# =====================================================================
+# ===== Download ASR and QA Models from GCS =====
 RUN python download_models.py
 
-# =====================================================================
-# ✅ 6. Expose port for FastAPI
-# =====================================================================
+# ===== Expose and Run =====
 EXPOSE 8080
-
-# =====================================================================
-# ✅ 7. Start app (GPU-ready, non-blocking startup)
-# =====================================================================
-CMD ["python3", "main.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
