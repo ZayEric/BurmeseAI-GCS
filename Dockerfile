@@ -1,30 +1,34 @@
-# ===== Base Image: CUDA 12.1 + Ubuntu 22.04 =====
+# ===== BASE IMAGE: CUDA runtime for GPU inference =====
 FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
-# ===== Environment Setup =====
+# ===== ENV CONFIG =====
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 WORKDIR /app
 
-# ===== Install Python 3.11 and dependencies =====
+# ===== INSTALL PYTHON =====
 RUN apt-get update && apt-get install -y \
     python3.11 python3.11-venv python3.11-distutils python3-pip \
-    curl git ffmpeg && \
+    git curl ffmpeg && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
 
-RUN ln -sf /usr/bin/python3.11 /usr/bin/python
 RUN python -m pip install --upgrade pip
 
-# ===== Copy requirements and install dependencies =====
+# ===== COPY DEPENDENCIES =====
 COPY requirements.txt .
+
+# ===== INSTALL DEPENDENCIES =====
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121 \
-    && pip install --no-cache-dir google-cloud-storage fastapi uvicorn
+    && pip install --no-cache-dir google-cloud-storage Flask pydub soundfile transformers
 
-# ===== Copy source code =====
-COPY . /app
+# ===== COPY APP FILES =====
+COPY . .
 
-# ===== Expose and Run =====
+# ===== EXPOSE PORT =====
 EXPOSE 8080
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# ===== RUN FLASK APP =====
+CMD ["python", "main.py"]
