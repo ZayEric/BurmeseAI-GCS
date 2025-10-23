@@ -17,6 +17,7 @@ import base64
 import io
 import soundfile as sf
 from pydub import AudioSegment
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 device = 0 if torch.cuda.is_available() else -1
 print(f"🔥 Using device: {'GPU' if device == 0 else 'CPU'}")
@@ -46,8 +47,11 @@ qa_tokenizer = None
 
 
 # ========== UTIL: GCS Download ==========
-def download_from_gcs(bucket_name, prefix, local_dir):
-    """Download all files recursively from GCS prefix to local_dir."""
+def download_from_gcs(bucket_name, prefix, local_dir, max_workers=8):
+    """
+    Download all files from GCS prefix to local_dir using parallel threads.
+    Skips empty files and checkpoint folder.
+    """
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     blobs = list(bucket.list_blobs(prefix=prefix))
@@ -57,16 +61,27 @@ def download_from_gcs(bucket_name, prefix, local_dir):
         return
 
     os.makedirs(local_dir, exist_ok=True)
-    for blob in blobs:
+
+    def download_blob(blob):
         if blob.size == 0:
-            continue
+            return None
         rel_path = os.path.relpath(blob.name, prefix)
         if rel_path.startswith("checkpoint/"):
-            continue
+            return None
         dest_path = os.path.join(local_dir, rel_path)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         blob.download_to_filename(dest_path)
         logging.info(f"📦 {blob.name} → {dest_path}")
+        return blob.name
+
+    # Use ThreadPoolExecutor to download files in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(download_blob, blob) for blob in blobs]
+        for future in as_completed(futures):
+            try:
+                _ = future.result()
+            except Exception as e:
+                logging.error(f"❌ Failed to download a file: {e}")
 
     logging.info(f"✅ Finished downloading {len(blobs)} files from gs://{bucket_name}/{prefix}")
 
