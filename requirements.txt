@@ -6,4 +6,5 @@ requests
 sentencepiece
 soundfile
 transformers>=4.40.0
+pydub
 
