@@ -1,38 +1,35 @@
-# ===== BASE IMAGE: CUDA runtime for GPU inference =====
+# ===== BASE IMAGE: CUDA runtime =====
 FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
-# ===== ENV CONFIG =====
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 WORKDIR /app
 
-# ===== INSTALL PYTHON =====
+# Install Python + tools
 RUN apt-get update && apt-get install -y \
     python3.11 python3.11-venv python3.11-distutils python3-pip \
     git curl ffmpeg && \
     ln -sf /usr/bin/python3.11 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip
 RUN python -m pip install --upgrade pip
 
-# ===== COPY DEPENDENCIES =====
+# Copy requirements
 COPY requirements.txt .
 
-# Install requirements first (without transformers)
+# Install torch first (CUDA)
+RUN pip install --no-cache-dir torch==2.1.0+cu121 torchvision==0.16.0+cu121 torchaudio==2.1.0+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Install other dependencies including transformers
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install torch with CUDA support
-RUN pip install --no-cache-dir torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121
-
-# Then install transformers last
-RUN pip install --no-cache-dir transformers
-
-# ===== COPY APP FILES =====
+# Copy app code
 COPY . .
 
-# ===== EXPOSE PORT =====
+# Expose port
 EXPOSE 8080
 
-# ===== RUN FLASK APP =====
+# Run app
 CMD ["python", "main.py"]
