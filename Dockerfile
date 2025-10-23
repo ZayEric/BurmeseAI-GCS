@@ -25,9 +25,6 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # ===== Copy source code =====
 COPY . /app
 
-# ===== Download ASR and QA Models from GCS =====
-RUN python download_models.py
-
 # ===== Expose and Run =====
 EXPOSE 8080
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
