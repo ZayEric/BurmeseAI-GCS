@@ -232,7 +232,7 @@ def text_to_qa():
 def preload_models():
     logging.info("🕐 Starting background model preload...")
     try:
-        _ = get_asr_pipeline()
+        #_ = get_asr_pipeline()
         _ = get_qa_pipeline()
         logging.info("✅ All models loaded successfully in background.")
     except Exception as e:
