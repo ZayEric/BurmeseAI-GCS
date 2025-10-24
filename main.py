@@ -233,5 +233,14 @@ if __name__ == "__main__":
     else:
         logging.warning("⚠️ GPU not available — using CPU")
 
-    logging.info("Starting Flask app on port 8080...")
+    # 🧠 Preload models before serving
+    logging.info("🕐 Preloading ASR and QA models at startup...")
+    try:
+        _ = get_asr_pipeline()
+        _ = get_qa_pipeline()
+        logging.info("✅ All models loaded successfully before first request.")
+    except Exception as e:
+        logging.error(f"❌ Failed during model preload: {e}")
+
+    logging.info("🚀 Starting Flask app on port 8080...")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
