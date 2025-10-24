@@ -18,6 +18,8 @@ import io
 import soundfile as sf
 from pydub import AudioSegment
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading, time
+
 
 device = 0 if torch.cuda.is_available() else -1
 print(f"🔥 Using device: {'GPU' if device == 0 else 'CPU'}")
@@ -227,20 +229,23 @@ def text_to_qa():
 
 
 # ========== ENTRY ==========
+def preload_models():
+    logging.info("🕐 Starting background model preload...")
+    try:
+        _ = get_asr_pipeline()
+        _ = get_qa_pipeline()
+        logging.info("✅ All models loaded successfully in background.")
+    except Exception as e:
+        logging.error(f"❌ Failed during model preload: {e}")
+
 if __name__ == "__main__":
     if torch.cuda.is_available():
         logging.info(f"🔥 GPU available: {torch.cuda.get_device_name(0)}")
     else:
         logging.warning("⚠️ GPU not available — using CPU")
 
-    # 🧠 Preload models before serving
-    logging.info("🕐 Preloading ASR and QA models at startup...")
-    try:
-        #_ = get_asr_pipeline()
-        _ = get_qa_pipeline()
-        logging.info("✅ All models loaded successfully before first request.")
-    except Exception as e:
-        logging.error(f"❌ Failed during model preload: {e}")
+    # Launch preload asynchronously so app can start fast
+    threading.Thread(target=preload_models, daemon=True).start()
 
     logging.info("🚀 Starting Flask app on port 8080...")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
