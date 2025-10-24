@@ -27,7 +27,7 @@ print(f"🔥 Using device: {'GPU' if device == 0 else 'CPU'}")
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-WORKSPACE = "/workspace"
+WORKSPACE = os.getenv("TRANSFORMERS_CACHE", "/workspace")
 ASR_BUCKET = "speechtotext-model-bucket"
 ASR_PREFIX = "model/finetuned-seamlessm4t-burmese"
 QA_BUCKET = "qa-model-bucket"
