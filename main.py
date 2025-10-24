@@ -236,7 +236,7 @@ if __name__ == "__main__":
     # 🧠 Preload models before serving
     logging.info("🕐 Preloading ASR and QA models at startup...")
     try:
-        _ = get_asr_pipeline()
+        #_ = get_asr_pipeline()
         _ = get_qa_pipeline()
         logging.info("✅ All models loaded successfully before first request.")
     except Exception as e:
