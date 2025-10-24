@@ -4,6 +4,9 @@ FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
+ENV TRANSFORMERS_CACHE=/workspace/hf_cache
+RUN mkdir -p /workspace/hf_cache
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
