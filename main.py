@@ -1,251 +1,175 @@
 import os
 import logging
+import threading
+import time
 from threading import Lock
 from flask import Flask, request, jsonify
 import tempfile
 from google.cloud import storage
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import torch
 from transformers import (
     pipeline,
-    AutoModelForSpeechSeq2Seq,
-    AutoProcessor,
     AutoTokenizer,
     AutoModelForSeq2SeqLM
 )
-import torch
+
+# audio libs used only by speech endpoints (keep if you need them)
 import requests
 import base64
 import io
 import soundfile as sf
 from pydub import AudioSegment
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading, time
 
+# ---------- CONFIG ----------
+WORKSPACE = os.getenv("TRANSFORMERS_CACHE", "/workspace/hf_cache")
+os.environ["TRANSFORMERS_CACHE"] = WORKSPACE
+os.makedirs(WORKSPACE, exist_ok=True)
 
-device = 0 if torch.cuda.is_available() else -1
-print(f"🔥 Using device: {'GPU' if device == 0 else 'CPU'}")
-
-
-# ========== CONFIG ==========
-app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
-
-WORKSPACE = os.getenv("TRANSFORMERS_CACHE", "/workspace")
 ASR_BUCKET = "speechtotext-model-bucket"
 ASR_PREFIX = "model/finetuned-seamlessm4t-burmese"
 QA_BUCKET = "qa-model-bucket"
 QA_PREFIX = "model/finetuned-qa-burmese"
 
-# ========== THREAD SAFETY ==========
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
 asr_lock = Lock()
 qa_lock = Lock()
 
-# ========== GLOBAL MODELS ==========
-asr_pipe = None
+# global model objects + state flags
 qa_pipe = None
-asr_model = None
-asr_processor = None
 qa_model = None
 qa_tokenizer = None
+model_loading = False
+model_ready = False
+model_load_error = None
 
-
-# ========== UTIL: GCS Download ==========
+# ---------- download helper (parallel) ----------
 def download_from_gcs(bucket_name, prefix, local_dir, max_workers=8):
-    """
-    Download all files from GCS prefix to local_dir using parallel threads.
-    Skips empty files and checkpoint folder.
-    """
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     blobs = list(bucket.list_blobs(prefix=prefix))
-
     if not blobs:
-        logging.warning(f"⚠️ No files found in gs://{bucket_name}/{prefix}")
+        logger.warning("⚠️ No files found in gs://%s/%s", bucket_name, prefix)
         return
 
     os.makedirs(local_dir, exist_ok=True)
 
-    def download_blob(blob):
+    def _dl(blob):
         if blob.size == 0:
-            return None
-        rel_path = os.path.relpath(blob.name, prefix)
-        if rel_path.startswith("checkpoint/"):
-            return None
-        dest_path = os.path.join(local_dir, rel_path)
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        blob.download_to_filename(dest_path)
-        logging.info(f"📦 {blob.name} → {dest_path}")
-        return blob.name
+            return
+        rel = os.path.relpath(blob.name, prefix)
+        if rel.startswith("checkpoint/"):
+            return
+        dest = os.path.join(local_dir, rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        blob.download_to_filename(dest)
+        logger.info("📦 %s → %s", blob.name, dest)
 
-    # Use ThreadPoolExecutor to download files in parallel
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(download_blob, blob) for blob in blobs]
-        for future in as_completed(futures):
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_dl, b) for b in blobs]
+        for f in as_completed(futures):
             try:
-                _ = future.result()
+                f.result()
             except Exception as e:
-                logging.error(f"❌ Failed to download a file: {e}")
+                logger.error("Failed to download a blob: %s", e)
 
-    logging.info(f"✅ Finished downloading {len(blobs)} files from gs://{bucket_name}/{prefix}")
+    logger.info("✅ Finished downloading %d files from gs://%s/%s", len(blobs), bucket_name, prefix)
 
-
-# ========== ASR LOADER ==========
-def get_asr_pipeline():
-    global asr_pipe, asr_model, asr_processor
-    with asr_lock:
-        if asr_pipe is None:
-            local_path = os.path.join(WORKSPACE, "asr")
-            if not os.path.exists(local_path) or not os.listdir(local_path):
-                logging.info("⬇️ Downloading ASR model from GCS...")
-                download_from_gcs(ASR_BUCKET, ASR_PREFIX, local_path)
-
-            logging.info(f"🚀 Loading ASR model from {local_path}...")
-            dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-            asr_processor = AutoProcessor.from_pretrained(local_path)
-            asr_model = AutoModelForSpeechSeq2Seq.from_pretrained(local_path, torch_dtype=dtype)
-            asr_pipe = pipeline(
-                "automatic-speech-recognition",
-                model=asr_model,
-                tokenizer=asr_processor.tokenizer,
-                feature_extractor=asr_processor.feature_extractor,
-                torch_dtype=dtype,
-                device_map="auto"
-            )
-            logging.info("✅ ASR model loaded successfully.")
-    return asr_pipe
-
-
-# ========== QA LOADER ==========
-def get_qa_pipeline():
+# ---------- QA loader (memory-friendly) ----------
+def load_qa_model(local_path):
     global qa_pipe, qa_model, qa_tokenizer
+    # Use memory-saving options. device_map="auto" lets accelerate/offload if available.
+    logger.info("Loading QA tokenizer/model from %s", local_path)
+    qa_tokenizer = AutoTokenizer.from_pretrained(local_path, use_fast=False)
+    qa_model = AutoModelForSeq2SeqLM.from_pretrained(
+        local_path,
+        device_map="auto",
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True
+    )
+    qa_pipe = pipeline("text2text-generation", model=qa_model, tokenizer=qa_tokenizer)
+    logger.info("✅ QA model loaded into memory")
+
+# ---------- Background preload ----------
+def preload_models_background():
+    global model_loading, model_ready, model_load_error
     with qa_lock:
-        if qa_pipe is None:
-            local_path = os.path.join(WORKSPACE, "qa")
-            if not os.path.exists(local_path) or not os.listdir(local_path):
-                logging.info("⬇️ Downloading QA model from GCS...")
-                download_from_gcs(QA_BUCKET, QA_PREFIX, local_path)
+        if model_ready or model_loading:
+            return
+        model_loading = True
 
-            logging.info(f"🚀 Loading QA model from {local_path}...")
-            qa_tokenizer = AutoTokenizer.from_pretrained(local_path, use_fast=False)
-            qa_model = AutoModelForSeq2SeqLM.from_pretrained(local_path, device_map="auto")
-            qa_pipe = pipeline("text2text-generation", model=qa_model, tokenizer=qa_tokenizer)
-            logging.info("✅ QA model loaded successfully.")
-    return qa_pipe
+    try:
+        start = time.time()
+        # download QA model files to cache
+        local_qa_dir = os.path.join(WORKSPACE, "qa")
+        if not os.path.exists(local_qa_dir) or not os.listdir(local_qa_dir):
+            logger.info("⬇️ Downloading QA model from GCS to %s", local_qa_dir)
+            download_from_gcs(QA_BUCKET, QA_PREFIX, local_qa_dir, max_workers=8)
+        else:
+            logger.info("QA files already present at %s", local_qa_dir)
 
+        # load model (memory-friendly)
+        load_qa_model(local_qa_dir)
+        model_ready = True
+        logger.info("Model ready (preload took %.1f s)", time.time() - start)
+    except Exception as e:
+        model_load_error = str(e)
+        logger.exception("Failed to preload model: %s", e)
+    finally:
+        model_loading = False
 
-# ========== HEALTH CHECK ==========
+# Kick off preload in a daemon thread at process start
+def start_preload_thread():
+    t = threading.Thread(target=preload_models_background, daemon=True)
+    t.start()
+    return t
+
+# Start preload right away (cold start)
+start_preload_thread()
+
+# ---------- Endpoints ----------
 @app.route("/healthz", methods=["GET"])
-def health_check():
-    return jsonify({"status": "ok"}), 200
+def healthz():
+    status = "ready" if model_ready else ("loading" if model_loading else "not_loaded")
+    return jsonify({"status": status}), 200 if model_ready else 503
 
-
-# ========== ASR API ==========
-@app.route("/asr", methods=["POST"])
-def transcribe_audio():
-    try:
-        data = request.get_json()
-        audio_base64 = data.get("audio_base64")
-        if not audio_base64:
-            return jsonify({"error": "Missing audio_base64"}), 400
-
-        # Support URL or base64
-        if audio_base64.startswith("http"):
-            audio_bytes = requests.get(audio_base64).content
-        else:
-            missing_padding = len(audio_base64) % 4
-            if missing_padding:
-                audio_base64 += '=' * (4 - missing_padding)
-            audio_bytes = base64.b64decode(audio_base64)
-
-        audio_stream = io.BytesIO(audio_bytes)
-        audio, sr = sf.read(audio_stream)
-
-        asr = get_asr_pipeline()
-        result = asr(audio, generate_kwargs={"max_new_tokens": 128})
-        return jsonify({"text": result["text"]})
-
-    except Exception as e:
-        logging.exception("ASR error")
-        return jsonify({"error": str(e)}), 500
-
-
-# ========== SPEECH → QA ==========
-@app.route("/speechqa", methods=["POST"])
-def speech_to_qa():
-    try:
-        data = request.get_json()
-        audio_url = data.get("audio_base64")
-        question = data.get("question", "")
-
-        if not audio_url:
-            return jsonify({"error": "Missing audio_base64"}), 400
-
-        # Download or decode audio
-        if audio_url.startswith("http"):
-            audio_bytes = requests.get(audio_url).content
-        else:
-            audio_bytes = base64.b64decode(audio_url)
-
-        # Convert to WAV
-        with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as tmp_in:
-            tmp_in.write(audio_bytes)
-            tmp_in_path = tmp_in.name
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_out:
-            tmp_out_path = tmp_out.name
-            try:
-                AudioSegment.from_file(tmp_in_path).export(tmp_out_path, format="wav")
-            except Exception:
-                tmp_out_path = tmp_in_path
-
-        # Run ASR
-        asr = get_asr_pipeline()
-        asr_result = asr(tmp_out_path, generate_kwargs={"tgt_lang": "mya"})
-        transcript = asr_result[0]["text"] if isinstance(asr_result, list) else asr_result["text"]
-
-        # Run QA
-        qa = get_qa_pipeline()
-        qa_result = qa(f"question: {question} context: {transcript}")
-        answer = qa_result[0]["generated_text"]
-
-        return jsonify({"transcript": transcript, "answer": answer})
-
-    except Exception as e:
-        logging.exception("SpeechQA error")
-        return jsonify({"error": str(e)}), 500
-
-
-# ========== TEXT QA ==========
 @app.route("/textqa", methods=["POST"])
-def text_to_qa():
+def textqa():
+    if not model_ready:
+        # short-circuit: model still loading
+        return jsonify({"error": "model loading", "loading": model_loading, "error_details": model_load_error}), 503
+
+    data = request.get_json(silent=True) or {}
+    question = data.get("text") or data.get("question") or ""
+    if not question:
+        return jsonify({"error": "missing 'text' or 'question'"}), 400
+
     try:
-        data = request.get_json()
-        question = data.get("text", "")
-        qa = get_qa_pipeline()
-        qa_result = qa(f"question: {question}\nAnswer:")
-        return jsonify({"answer": qa_result[0]["generated_text"]})
+        # run qa via the pipeline
+        result = qa_pipe(f"question: {question}\nAnswer:")
+        # pipeline returns list of dicts; check shape
+        answer = result[0].get("generated_text") if isinstance(result, list) else result.get("generated_text")
+        return jsonify({"answer": answer})
     except Exception as e:
-        logging.exception("TextQA error")
+        logger.exception("Error running QA")
         return jsonify({"error": str(e)}), 500
 
-
-# ========== ENTRY ==========
-def preload_models():
-    logging.info("🕐 Starting background model preload...")
-    try:
-        #_ = get_asr_pipeline()
-        _ = get_qa_pipeline()
-        logging.info("✅ All models loaded successfully in background.")
-    except Exception as e:
-        logging.error(f"❌ Failed during model preload: {e}")
+# other endpoints (asr/speechqa) should also check model_ready similarly before using QA model
 
 if __name__ == "__main__":
+    # log device & memory
     if torch.cuda.is_available():
-        logging.info(f"🔥 GPU available: {torch.cuda.get_device_name(0)}")
+        try:
+            logger.info("🔥 GPU available: %s", torch.cuda.get_device_name(0))
+        except Exception:
+            logger.info("🔥 GPU available")
     else:
-        logging.warning("⚠️ GPU not available — using CPU")
+        logger.warning("⚠️ GPU not available — using CPU")
 
-    # Launch preload asynchronously so app can start fast
-    threading.Thread(target=preload_models, daemon=True).start()
-
-    logging.info("🚀 Starting Flask app on port 8080...")
+    logger.info("Starting Flask (dev) on 0.0.0.0:8080 — preloading models in background")
+    # NOTE: in production run with gunicorn as shown below in Dockerfile recommendations
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
