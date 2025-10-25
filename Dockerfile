@@ -29,6 +29,8 @@ RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
-EXPOSE 8080
 
-CMD ["python", "main.py"]
+EXPOSE 8080
+# single process, threaded worker — adjust threads/workers to your CPU & memory
+CMD ["gunicorn", "-w", "1", "-k", "gthread", "--threads", "4", "-b", "0.0.0.0:8080", "main:app", "--timeout", "300"]
+
